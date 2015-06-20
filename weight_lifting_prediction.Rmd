@@ -1,0 +1,129 @@
+---
+title: "Weight Lifting Prediction"
+author: "Zhenhao Li"
+date: "18 June 2015"
+output:
+  html_document: default
+  
+---
+## Summary
+
+In this report we will describing the model we build, our usage of cross validation to estimate the expected out of sample error, and why we made the choices we did.
+
+
+```{r setoptions,echo=FALSE}
+library(knitr)
+opts_chunk$set(echo=TRUE, cache=TRUE, warning=FALSE, message=FALSE)
+```
+
+
+## Getting and cleaning data
+
+We download the files and load the two datasets into data frames.
+
+```{r}
+# url for the training data
+urlTrain <- "https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv"
+
+# url for the test data
+urlTest <- "https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv"
+
+# download the training data
+download.file(urlTrain, destfile="data_train.csv", method="curl")
+
+# download the test data
+download.file(urlTest, destfile="data_test.csv", method="curl")
+
+# load the data into data frames
+data_train <- read.csv("data_train.csv")
+data_test <- read.csv("data_test.csv")
+
+```
+
+First let us see the size of the data.
+```{r}
+dim(data_train)
+dim(data_test)
+```
+Note that we do have many training observations.
+
+To get an initial idea of our data, we read the first 3 rows from each data set.
+```{r}
+head(data_train,3)
+head(data_test,3)
+```
+
+Then perform some cleaning according to our purposes. Firstly, we want to get rid of all variables in the training data and the test data that have NA values in any observation. Secondly, we remove all the variables that we think are irrelevant to the predication of the classe variable, such as "X", "user_name", "cvtd_timestamp","new_window", "num_window", "raw_timestamp_part_1", and "raw_timestamp_part_2". 
+
+```{r}
+library(dplyr)
+# Get rid of columns that contain NA values in data_train and data_test
+na.sum_train  <- sapply(data_train, function (x) {sum(is.na(x))})
+na.sum_test  <- sapply(data_test, function (x) {sum(is.na(x))})
+train_na_removed <- data_train[,na.sum_train == 0 & na.sum_test==0]
+test_na_removed <- data_test[,na.sum_train == 0 & na.sum_test==0]
+
+# Get rid of irrelevant columns in data_train
+trainData <- train_na_removed[,  -which(names(train_na_removed) %in% c("X", "user_name", "cvtd_timestamp","new_window", "num_window", "raw_timestamp_part_1","raw_timestamp_part_2"))]
+
+# Get rid of irrelevant columns in data_test
+testData  <- test_na_removed[,  -which(names(test_na_removed) %in% c("X", "user_name", "cvtd_timestamp","new_window", "num_window", "raw_timestamp_part_1","raw_timestamp_part_2"))]
+
+```
+
+Now the data frame "trainData" is our data for the training purposes and the the data frame "testData" is our test data for the project. This report does not contain performing predictions on the test data since it is done in the other part of the assignment. For the rest of this report, "trainData" is the data we use to build our model and perform cross validation.  
+
+## Cross validation
+To estimate the expected out of sample error, we perform a 1-fold cross validation. To do so, we slice "trainData" into a 60% training subset and a 40% test subset. 
+
+```{r}
+# set seed for reproducibility
+set.seed(2015)
+
+library(caret)
+
+# create a 60% training subset and a 40% test subset
+inTrain <- createDataPartition(y=trainData$classe,p=0.6, list=FALSE)
+training <- trainData[inTrain,]
+testing <- trainData[-inTrain,]
+```
+
+## Model building
+Because random forest is one of the most accurate algorithms along with boosting and we have enough cross validation test data to avoid the danger of over-fitting, we decide to build a random forest model.
+
+To boost the computation, we use the following code to enable parallel processing.
+```{r}
+# enable multi-core processing
+library(doParallel)
+cl <- makeCluster(detectCores())
+registerDoParallel(cl)
+```
+
+The model is built by the following code.
+```{r}
+library(randomForest)
+modFit_rf <- randomForest(classe ~ ., data=training)
+```
+
+We check the summary of the model.
+
+```{r}
+modFit_rf
+```
+
+## Expected out of sample error
+
+As stated earlier, we use our cross validation test data to estimate the expected out of sample error.
+
+```{r}
+pred_rf <- predict(modFit_rf, testing)
+t_rf <- table(pred_rf, testing$classe)
+total <- t_rf[1,1]+ t_rf[2,2] + t_rf[3,3] + t_rf[4,4] + t_rf[5,5]
+error_rate <- 1 - total / nrow(testing)
+t_rf
+```
+
+It is easy to calculate that our estimated expected out of sample error is `r error_rate`, which is just slightly larger than the estimate of error rate reported by the model.
+So we have high confidence that our model does not over-fit and can produce very accurate predictions. Hence there is no need to consider other models.
+
+
